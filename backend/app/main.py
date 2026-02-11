@@ -12,7 +12,7 @@ app = FastAPI(title="Plagiarism Check Tool API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Later replace with frontend URL
+    allow_origins=["*"],  # Baad mai frontend URL daalna hai
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
