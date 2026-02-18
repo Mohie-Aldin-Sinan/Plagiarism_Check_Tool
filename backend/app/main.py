@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import ingest, detect
+from app.api.v1.ingest import router as ingest_router
+from app.api.v1.detect import router as detect_router
 
 app = FastAPI(title="Plagiarism Check Tool API")
 
@@ -19,5 +20,5 @@ async def root():
     return {"message": "Plagiarism Checker Backend Running"}
 
 # Mount sub-apps with distinct prefixes so docs and routes are visible
-app.mount("/api/v1/ingest", ingest.app)
-app.mount("/api/v1/detect", detect.app)
+app.include_router(ingest_router, prefix="/api/v1/ingest", tags=["Ingest"])
+app.include_router(detect_router, prefix="/api/v1/detect", tags=["Detect"])

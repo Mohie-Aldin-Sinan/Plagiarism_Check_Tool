@@ -5,7 +5,7 @@ import os
 from typing import Iterable, Optional
 
 import pandas as pd
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, UploadFile
 
 from app.services.preprocess import preprocess_texts
 from app.services.detect import sha256_hash
@@ -15,8 +15,14 @@ from app.storage.repository import (
 	async_insert_embeddings,
 	async_insert_reference_texts,
 )
+from fastapi import APIRouter
 
-app = FastAPI(title="Ingest API")
+router = APIRouter()
+
+@router.post("/")
+async def ingest_data():
+    return {"message": "Ingest endpoint"}
+
 
 
 def _read_rows_from_file(filename: str, contents: bytes) -> Iterable[str]:
