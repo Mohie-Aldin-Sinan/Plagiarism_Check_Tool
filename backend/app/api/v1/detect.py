@@ -9,8 +9,13 @@ from app.services.detect import is_exact_duplicate
 from app.services.fuzzy import is_fuzzy_duplicate, find_fuzzy_duplicates_in_batch
 from app.storage.repository import async_fetch_all_texts_by_batch
 
-app = FastAPI(title="Detect API")
+from fastapi import APIRouter
 
+router = APIRouter()
+
+@router.post("/")
+async def detect_data():
+    return {"message": "Detect endpoint"}
 
 # Pydantic model for batch fuzzy request
 class BatchFuzzyRequest(BaseModel):
