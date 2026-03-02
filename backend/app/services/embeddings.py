@@ -21,9 +21,10 @@ Usage:
     # → ~0.97 (very similar)
 """
 
+import asyncio
 import math
 import os
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import List, Optional, Sequence, Tuple
 
 from app.services.preprocess import preprocess_text
@@ -270,9 +271,13 @@ async def is_semantic_duplicate(
     if not candidate_texts:
         return False, None, None
 
-    # Encode all texts in one efficient batch
+    # Run in a thread pool to avoid blocking the async event loop.
     all_texts = [text] + list(candidate_texts)
-    all_vecs = encode_texts(all_texts, model_name=model_name, preprocess=True)
+    loop = asyncio.get_event_loop()
+    all_vecs = await loop.run_in_executor(
+        None,
+        partial(encode_texts, all_texts, model_name=model_name, preprocess=True),
+    )
 
     query_vec = all_vecs[0]
     candidate_vecs = all_vecs[1:]
