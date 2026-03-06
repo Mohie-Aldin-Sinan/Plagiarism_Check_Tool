@@ -12,6 +12,7 @@ from typing import Optional, Tuple
 from transformers import pipeline as hf_pipeline
 
 _DEFAULT_MODEL = "roberta-base-openai-detector"
+# _DEFAULT_MODEL = "roberta-large-openai-detector"
 
 
 # ── Model Loading ─────────────────────────────────────────────────────────────
@@ -21,7 +22,7 @@ def _load_detector(model_name: str):
     """Load and cache the HuggingFace classification pipeline."""
     if hf_pipeline is None:
         raise RuntimeError(
-            "transformers is not installed. "
+            "transformers might not be installed. "
             "Run: pip install transformers torch"
         )
     return hf_pipeline(
