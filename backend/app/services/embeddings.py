@@ -120,7 +120,61 @@ def find_semantic_matches(
     results.sort(key=lambda x: x[1], reverse=True)
     return results[:top_k]
 
+  
+# ==============================================================================
+# BATCH PAIRWISE DUPLICATE DETECTION – For Excel uploads / bulk checks
+# ==============================================================================
 
+def find_semantic_duplicates_in_batch(
+    texts: Sequence[str],
+    threshold: float = 0.85,
+    model_name: Optional[str] = None,
+) -> List[Tuple[int, int, float]]:
+    """
+    Find all semantic duplicate pairs within a batch of texts.
+
+    Encodes every text in one efficient forward pass, then computes
+    pairwise cosine similarity and returns pairs above the threshold.
+
+    Analogous to ``find_fuzzy_duplicates_in_batch()`` in fuzzy.py but
+    uses embedding similarity instead of string-matching algorithms.
+
+    Args:
+        texts: List of raw text strings to compare.
+        threshold: Minimum cosine similarity to flag as duplicate (0.0–1.0).
+        model_name: Optional model override.
+
+    Returns:
+        List of (index_i, index_j, similarity_score) for each duplicate pair,
+        sorted by similarity descending.
+
+    Example:
+        duplicates = find_semantic_duplicates_in_batch(
+            ["Samsung Galaxy S23", "iPhone 15 Pro", "Samsung Galxy S23"],
+            threshold=0.80,
+        )
+        # → [(0, 2, 0.9712)]
+    """
+    if len(texts) < 2:
+        return []
+
+    # Encode all texts in a single batch for efficiency
+    all_vecs = encode_texts(texts, model_name=model_name, preprocess=True)
+
+    duplicates: List[Tuple[int, int, float]] = []
+    n = len(texts)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            score = cosine_similarity(all_vecs[i], all_vecs[j])
+            if score >= threshold:
+                duplicates.append((i, j, round(score, 4)))
+
+    # Sort by score descending
+    duplicates.sort(key=lambda x: x[2], reverse=True)
+    return duplicates
+
+  
 # ── Duplicate Detection ───────────────────────────────────────────────────────
 
 async def is_semantic_duplicate(
