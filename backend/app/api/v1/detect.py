@@ -1,4 +1,4 @@
-"""Detection endpoints for exact and fuzzy matching."""
+"""Detection endpoints for exact, fuzzy, and semantic matching."""
 
 import io
 import uuid
@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.services.detect import is_exact_duplicate
 from app.services.fuzzy import is_fuzzy_duplicate, find_fuzzy_duplicates_in_batch
+from app.services.embeddings import is_semantic_duplicate, find_semantic_duplicates_in_batch, is_available as embeddings_available
 from app.services.reports import DetectionResult, classify_risk, generate_report_bytes, _OPENPYXL_AVAILABLE
 from app.storage.repository import async_fetch_all_texts_by_batch, async_get_batch_id_by_name
 
@@ -16,6 +17,12 @@ app = APIRouter()
 
 
 class BatchFuzzyRequest(BaseModel):
+    texts: list[str]
+    threshold: float = 0.85
+    download_report: bool = False
+
+
+class BatchSemanticRequest(BaseModel):
     texts: list[str]
     threshold: float = 0.85
     download_report: bool = False
@@ -184,5 +191,139 @@ async def detect_batch_fuzzy_duplicates(request: BatchFuzzyRequest):
                 "scores": scores,
             }
             for i, j, scores in duplicates
+        ],
+    }
+
+
+# ==============================================================================
+# SEMANTIC DUPLICATE DETECTION — SBERT + Cosine Similarity
+# ==============================================================================
+
+@app.post("/semantic")
+async def detect_semantic_duplicate(
+    text: str = Form(...),
+    batch_id: str | None = Form(None),
+    batch_name: str | None = Form(None),
+    threshold: float = Form(0.85),
+    download_report: bool = Form(False),
+):
+    """Check if a single text is a semantic duplicate of any stored reference text."""
+    if not embeddings_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Semantic detection unavailable. Install: pip install sentence-transformers",
+        )
+
+    resolved_batch_id = batch_id
+
+    if batch_name:
+        resolved_batch_id = await async_get_batch_id_by_name(batch_name)
+        if not resolved_batch_id:
+            raise HTTPException(status_code=404, detail="batch_name not found")
+
+    if resolved_batch_id:
+        try:
+            uuid.UUID(resolved_batch_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="batch_id must be a valid UUID")
+
+    candidates = await async_fetch_all_texts_by_batch(resolved_batch_id)
+
+    is_dup, matched_text, score = await is_semantic_duplicate(
+        text,
+        candidates,
+        threshold=threshold,
+    )
+
+    if download_report:
+        if not _OPENPYXL_AVAILABLE:
+            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
+        result = DetectionResult(
+            text=text,
+            is_duplicate=is_dup,
+            similarity_scores={"cosine_similarity": score or 0.0},
+            source=matched_text,
+            risk_level=classify_risk(score) if is_dup and score else "none",
+            detection_method="semantic",
+        )
+        report_bytes = generate_report_bytes([result])
+        return StreamingResponse(
+            io.BytesIO(report_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=semantic_detection_report.xlsx"},
+        )
+
+    return {
+        "is_duplicate": is_dup,
+        "matched_text": matched_text,
+        "similarity_score": score,
+        "threshold": threshold,
+        "batch_id": resolved_batch_id,
+        "batch_name": batch_name,
+        "scope": "batch" if resolved_batch_id else "global",
+    }
+
+
+@app.post("/batch-semantic")
+async def detect_batch_semantic_duplicates(request: BatchSemanticRequest):
+    """Find all semantic duplicate pairs within a submitted batch of texts."""
+    if not embeddings_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Semantic detection unavailable. Install: pip install sentence-transformers",
+        )
+
+    if len(request.texts) < 2:
+        raise HTTPException(status_code=400, detail="Provide at least 2 texts for batch comparison")
+
+    duplicates = find_semantic_duplicates_in_batch(
+        request.texts,
+        threshold=request.threshold,
+    )
+
+    if request.download_report:
+        if not _OPENPYXL_AVAILABLE:
+            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
+        seen: set[int] = set()
+        results = []
+        for i, j, score in duplicates:
+            for idx, other_idx in [(i, j), (j, i)]:
+                if idx not in seen:
+                    seen.add(idx)
+                    results.append(DetectionResult(
+                        text=request.texts[idx],
+                        is_duplicate=True,
+                        similarity_scores={"cosine_similarity": score},
+                        source=request.texts[other_idx],
+                        risk_level=classify_risk(score),
+                        detection_method="semantic",
+                    ))
+        for idx, t in enumerate(request.texts):
+            if idx not in seen:
+                results.append(DetectionResult(
+                    text=t,
+                    is_duplicate=False,
+                    risk_level="none",
+                    detection_method="semantic",
+                ))
+        report_bytes = generate_report_bytes(results)
+        return StreamingResponse(
+            io.BytesIO(report_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=batch_semantic_report.xlsx"},
+        )
+
+    return {
+        "total_texts": len(request.texts),
+        "duplicate_pairs": len(duplicates),
+        "duplicates": [
+            {
+                "index1": i,
+                "index2": j,
+                "text1": request.texts[i],
+                "text2": request.texts[j],
+                "cosine_similarity": score,
+            }
+            for i, j, score in duplicates
         ],
     }

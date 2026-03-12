@@ -118,36 +118,3 @@ async def detect_ai_batch(
     """
     tasks = [detect_ai_content(text, model_name) for text in texts]
     return await asyncio.gather(*tasks)
-
-
-# ── Quick Test ────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    test_cases = [
-        "The mitochondria is the powerhouse of the cell.",
-        (
-            "In conclusion, leveraging synergistic paradigms will fundamentally "
-            "transform our holistic approach to scalable solutions."
-        ),
-        "hey bro wats up, u coming to the party tmrw?",
-        (
-            "Artificial intelligence has made remarkable strides in natural "
-            "language processing, enabling machines to generate coherent and "
-            "contextually relevant text."
-        ),
-    ]
-
-    print("=" * 60)
-    print("AI Content Detection Results")
-    print("Model:", _DEFAULT_MODEL)
-    print("=" * 60)
-
-    for i, text in enumerate(test_cases, 1):
-        result = detect_ai_content_sync(text)
-        print(f"\n[Test {i}]")
-        print(f"  Text      : {text[:65]}...")
-        print(f"  Label     : {result['label']}")
-        print(f"  Confidence: {result['confidence'] * 100:.2f}%")
-        print(f"  Raw Label : {result['raw_label']}")
-
-    print("\n" + "=" * 60)
