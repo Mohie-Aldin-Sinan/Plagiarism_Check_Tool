@@ -327,3 +327,13 @@ def generate_report_bytes(
         _style_worksheet(ws, df)
 
     return buffer.getvalue()
+
+
+def generate_report_csv_bytes(
+    results: List[DetectionResult],
+) -> bytes:
+    """Generate a CSV report and return it as raw bytes."""
+    df = _build_dataframe(results)
+    buffer = io.StringIO()
+    df.to_csv(buffer, index=False)
+    return buffer.getvalue().encode("utf-8")

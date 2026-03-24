@@ -20,6 +20,7 @@ from app.services.reports import (
     DetectionResult,
     classify_risk,
     generate_report_bytes,
+    generate_report_csv_bytes,
     _OPENPYXL_AVAILABLE,
 )
 
@@ -36,6 +37,7 @@ class BatchLicenseRequest(BaseModel):
     texts: list[str]
     threshold: float = 0.3
     download_report: bool = False
+    download_format: str = "xlsx"
 
 
 class SingleLicenseRequest(BaseModel):
@@ -151,19 +153,8 @@ async def check_license(
     file: Optional[UploadFile] = File(None),
     threshold: float = Form(0.3),
     download_report: bool = Form(False),
+    download_format: str = Form("xlsx"),
 ):
-    """
-    Check text or file for open source license content.
-
-    Args:
-        text: Text content to check (form data)
-        file: File upload (csv, xlsx, txt) - each row/line is checked separately
-        threshold: Minimum confidence threshold (0.0 to 1.0, default 0.3)
-        download_report: If True, return Excel report instead of JSON
-
-    Returns:
-        License detection results with confidence scores and matched licenses.
-    """
     if not is_available():
         raise HTTPException(
             status_code=503,
@@ -191,20 +182,33 @@ async def check_license(
         results = await detect_license_batch(rows, threshold)
 
         if download_report:
-            if not _OPENPYXL_AVAILABLE:
-                raise HTTPException(
-                    status_code=503,
-                    detail="openpyxl is not installed. Run: pip install openpyxl",
-                )
+            output_format = (download_format or "xlsx").lower()
+            if output_format not in {"xlsx", "excel", "csv"}:
+                raise HTTPException(status_code=400, detail="Invalid format. Use 'xlsx' or 'csv'")
+
             detection_results = [
                 _license_result_to_detection_result(text_row, res)
                 for text_row, res in zip(rows, results)
             ]
-            report_bytes = generate_report_bytes(detection_results)
+
+            if output_format in {"xlsx", "excel"}:
+                if not _OPENPYXL_AVAILABLE:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="openpyxl is not installed. Run: pip install openpyxl",
+                    )
+                report_bytes = generate_report_bytes(detection_results)
+                media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                filename = "license_check_report.xlsx"
+            else:
+                report_bytes = generate_report_csv_bytes(detection_results)
+                media_type = "text/csv"
+                filename = "license_check_report.csv"
+
             return StreamingResponse(
                 io.BytesIO(report_bytes),
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": "attachment; filename=license_check_report.xlsx"},
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
             )
 
         # Return JSON results
@@ -229,17 +233,30 @@ async def check_license(
         result = await detect_license(text, threshold)
 
         if download_report:
-            if not _OPENPYXL_AVAILABLE:
-                raise HTTPException(
-                    status_code=503,
-                    detail="openpyxl is not installed. Run: pip install openpyxl",
-                )
+            output_format = (download_format or "xlsx").lower()
+            if output_format not in {"xlsx", "excel", "csv"}:
+                raise HTTPException(status_code=400, detail="Invalid format. Use 'xlsx' or 'csv'")
+
             detection_result = _license_result_to_detection_result(text, result)
-            report_bytes = generate_report_bytes([detection_result])
+
+            if output_format in {"xlsx", "excel"}:
+                if not _OPENPYXL_AVAILABLE:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="openpyxl is not installed. Run: pip install openpyxl",
+                    )
+                report_bytes = generate_report_bytes([detection_result])
+                media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                filename = "license_check_report.xlsx"
+            else:
+                report_bytes = generate_report_csv_bytes([detection_result])
+                media_type = "text/csv"
+                filename = "license_check_report.csv"
+
             return StreamingResponse(
                 io.BytesIO(report_bytes),
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": "attachment; filename=license_check_report.xlsx"},
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
             )
 
         return _license_result_to_dict(result)
@@ -257,6 +274,7 @@ async def check_license_batch(
     file: Optional[UploadFile] = File(None),
     threshold: float = Form(0.3),
     download_report: bool = Form(False),
+    download_format: str = Form("xlsx"),
 ):
     """
     Batch check multiple texts for license content.
@@ -302,23 +320,37 @@ async def check_license_batch(
 
     results = await detect_license_batch(rows, effective_threshold)
 
+    request_download_format = request.download_format if request is not None else None
+    effective_format = (request_download_format or download_format or "xlsx").lower()
     should_download = download_report or (request is not None and request.download_report)
 
     if should_download:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(
-                status_code=503,
-                detail="openpyxl is not installed. Run: pip install openpyxl",
-            )
+        if effective_format not in {"xlsx", "excel", "csv"}:
+            raise HTTPException(status_code=400, detail="Invalid format. Use 'xlsx' or 'csv'")
+
         detection_results = [
             _license_result_to_detection_result(text_row, res)
             for text_row, res in zip(rows, results)
         ]
-        report_bytes = generate_report_bytes(detection_results)
+
+        if effective_format in {"xlsx", "excel"}:
+            if not _OPENPYXL_AVAILABLE:
+                raise HTTPException(
+                    status_code=503,
+                    detail="openpyxl is not installed. Run: pip install openpyxl",
+                )
+            report_bytes = generate_report_bytes(detection_results)
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            filename = "license_batch_report.xlsx"
+        else:
+            report_bytes = generate_report_csv_bytes(detection_results)
+            media_type = "text/csv"
+            filename = "license_batch_report.csv"
+
         return StreamingResponse(
             io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=license_batch_report.xlsx"},
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     licenses_found = sum(1 for r in results if r.has_license)

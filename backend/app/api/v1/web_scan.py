@@ -12,6 +12,7 @@ from app.services.reports import (
     DetectionResult,
     classify_risk,
     generate_report_bytes,
+    generate_report_csv_bytes,
     _OPENPYXL_AVAILABLE,
 )
 
@@ -24,6 +25,65 @@ class BatchWebScanRequest(BaseModel):
     max_queries: int = 2
     max_results_per_query: int = 3
     download_report: bool = False
+    download_format: str = "excel"
+
+
+_EXCEL_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _build_report_response(
+    results: list[DetectionResult],
+    base_filename: str,
+    download_format: str | None,
+):
+    fmt = (download_format or "excel").lower()
+
+    if fmt == "none":
+        return None
+
+    if fmt not in {"excel", "xlsx", "csv", "both"}:
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'excel', 'csv', 'both', or 'none'")
+
+    if fmt in {"excel", "xlsx"}:
+        if not _OPENPYXL_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="openpyxl not installed. Run: pip install openpyxl",
+            )
+        report_bytes = generate_report_bytes(results)
+        return StreamingResponse(
+            io.BytesIO(report_bytes),
+            media_type=_EXCEL_MEDIA_TYPE,
+            headers={"Content-Disposition": f"attachment; filename={base_filename}.xlsx"},
+        )
+
+    if fmt == "csv":
+        report_bytes = generate_report_csv_bytes(results)
+        return StreamingResponse(
+            io.BytesIO(report_bytes),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={base_filename}.csv"},
+        )
+
+    # fmt == "both"
+    if not _OPENPYXL_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="openpyxl not installed. Run: pip install openpyxl",
+        )
+    excel_bytes = generate_report_bytes(results)
+    csv_bytes = generate_report_csv_bytes(results)
+    zip_buffer = io.BytesIO()
+    import zipfile
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{base_filename}.xlsx", excel_bytes)
+        zf.writestr(f"{base_filename}.csv", csv_bytes)
+
+    return StreamingResponse(
+        io.BytesIO(zip_buffer.getvalue()),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={base_filename}_reports.zip"},
+    )
 
 
 def _to_detection_result(r) -> DetectionResult:
@@ -59,6 +119,7 @@ async def web_scan_single(
     max_queries: int = Form(3),
     max_results_per_query: int = Form(5),
     download_report: bool = Form(False),
+    download_format: str = Form("excel"),
 ):
     """
     Check a single text for plagiarism against live web sources.
@@ -81,17 +142,13 @@ async def web_scan_single(
         raise HTTPException(status_code=503, detail=result.error)
 
     if download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(
-                status_code=503,
-                detail="openpyxl not installed. Run: pip install openpyxl",
-            )
-        report_bytes = generate_report_bytes([_to_detection_result(result)])
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=web_scan_report.xlsx"},
+        response = _build_report_response(
+            [_to_detection_result(result)],
+            base_filename="web_scan_report",
+            download_format=download_format,
         )
+        if response:
+            return response
 
     return {
         "submitted_text": result.submitted_text,
@@ -138,17 +195,13 @@ async def web_scan_batch(request: BatchWebScanRequest):
     )
 
     if request.download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(
-                status_code=503,
-                detail="openpyxl not installed. Run: pip install openpyxl",
-            )
-        report_bytes = generate_report_bytes([_to_detection_result(r) for r in results])
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=web_scan_batch_report.xlsx"},
+        response = _build_report_response(
+            [_to_detection_result(r) for r in results],
+            base_filename="web_scan_batch_report",
+            download_format=request.download_format,
         )
+        if response:
+            return response
 
     total_flagged = sum(1 for r in results if r.is_plagiarism)
 

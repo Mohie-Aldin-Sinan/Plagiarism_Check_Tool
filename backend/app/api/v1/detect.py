@@ -2,6 +2,7 @@
 
 import io
 import uuid
+import zipfile
 
 from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,7 +11,13 @@ from pydantic import BaseModel
 from app.services.detect import is_exact_duplicate
 from app.services.fuzzy import is_fuzzy_duplicate, find_fuzzy_duplicates_in_batch
 from app.services.embeddings import is_semantic_duplicate, find_semantic_duplicates_in_batch, is_available as embeddings_available
-from app.services.reports import DetectionResult, classify_risk, generate_report_bytes, _OPENPYXL_AVAILABLE
+from app.services.reports import (
+    DetectionResult,
+    classify_risk,
+    generate_report_bytes,
+    generate_report_csv_bytes,
+    _OPENPYXL_AVAILABLE,
+)
 from app.services import word2vec as word2vec_service
 from app.services import clustering as clustering_service
 from app.storage.repository import (
@@ -26,12 +33,14 @@ class BatchFuzzyRequest(BaseModel):
     texts: list[str]
     threshold: float = 0.85
     download_report: bool = False
+    download_format: str = "excel"
 
 
 class BatchSemanticRequest(BaseModel):
     texts: list[str]
     threshold: float = 0.85
     download_report: bool = False
+    download_format: str = "excel"
 
 
 class CrossBatchRequest(BaseModel):
@@ -39,6 +48,63 @@ class CrossBatchRequest(BaseModel):
     method: str = "fuzzy"          # "exact" | "fuzzy" | "semantic"
     threshold: float = 0.85
     download_report: bool = False
+    download_format: str = "excel"
+
+
+_EXCEL_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _build_report_response(
+    results: list[DetectionResult],
+    base_filename: str,
+    download_format: str | None,
+):
+    """Create a StreamingResponse for the requested download format.
+
+    Supports excel, csv, both (zip), or none.
+    """
+    fmt = (download_format or "excel").lower()
+
+    if fmt == "none":
+        return None
+
+    if fmt not in {"excel", "xlsx", "csv", "both"}:
+        raise HTTPException(status_code=400, detail="Invalid download_format. Use 'excel', 'csv', 'both', or 'none'")
+
+    if fmt in {"excel", "xlsx"}:
+        if not _OPENPYXL_AVAILABLE:
+            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
+        report_bytes = generate_report_bytes(results)
+        return StreamingResponse(
+            io.BytesIO(report_bytes),
+            media_type=_EXCEL_MEDIA_TYPE,
+            headers={"Content-Disposition": f"attachment; filename={base_filename}.xlsx"},
+        )
+
+    if fmt == "csv":
+        report_bytes = generate_report_csv_bytes(results)
+        return StreamingResponse(
+            io.BytesIO(report_bytes),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={base_filename}.csv"},
+        )
+
+    # fmt == "both"
+    if not _OPENPYXL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
+
+    excel_bytes = generate_report_bytes(results)
+    csv_bytes = generate_report_csv_bytes(results)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{base_filename}.xlsx", excel_bytes)
+        zf.writestr(f"{base_filename}.csv", csv_bytes)
+
+    return StreamingResponse(
+        io.BytesIO(zip_buffer.getvalue()),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={base_filename}_reports.zip"},
+    )
 
 
 @app.get("/")
@@ -52,6 +118,7 @@ async def detect_exact(
     batch_id: str | None = Form(None),
     batch_name: str | None = Form(None),
     download_report: bool = Form(False),
+    download_format: str = Form("excel"),
 ):
     resolved_batch_id = batch_id
 
@@ -69,20 +136,18 @@ async def detect_exact(
     is_dup = await is_exact_duplicate(text, resolved_batch_id)
 
     if download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
-        result = DetectionResult(
-            text=text,
-            is_duplicate=is_dup,
-            risk_level="high" if is_dup else "none",
-            detection_method="exact",
+        response = _build_report_response(
+            [DetectionResult(
+                text=text,
+                is_duplicate=is_dup,
+                risk_level="high" if is_dup else "none",
+                detection_method="exact",
+            )],
+            base_filename="exact_detection_report",
+            download_format=download_format,
         )
-        report_bytes = generate_report_bytes([result])
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=exact_detection_report.xlsx"},
-        )
+        if response:
+            return response
 
     return {
         "is_duplicate": is_dup,
@@ -100,6 +165,7 @@ async def detect_fuzzy_duplicate(
     batch_name: str | None = Form(None),
     threshold: float = Form(0.85),
     download_report: bool = Form(False),
+    download_format: str = Form("excel"),
 ):
     resolved_batch_id = batch_id
 
@@ -123,23 +189,21 @@ async def detect_fuzzy_duplicate(
     )
 
     if download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
         best_score = max(scores.values()) if scores else 0.0
-        result = DetectionResult(
-            text=text,
-            is_duplicate=is_dup,
-            similarity_scores=scores or {},
-            source=matched_text,
-            risk_level=classify_risk(best_score) if is_dup else "none",
-            detection_method="fuzzy",
+        response = _build_report_response(
+            [DetectionResult(
+                text=text,
+                is_duplicate=is_dup,
+                similarity_scores=scores or {},
+                source=matched_text,
+                risk_level=classify_risk(best_score) if is_dup else "none",
+                detection_method="fuzzy",
+            )],
+            base_filename="fuzzy_detection_report",
+            download_format=download_format,
         )
-        report_bytes = generate_report_bytes([result])
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=fuzzy_detection_report.xlsx"},
-        )
+        if response:
+            return response
 
     return {
         "is_duplicate": is_dup,
@@ -160,8 +224,6 @@ async def detect_batch_fuzzy_duplicates(request: BatchFuzzyRequest):
     )
 
     if request.download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
         seen: set[int] = set()
         results = []
         for i, j, scores in duplicates:
@@ -185,12 +247,13 @@ async def detect_batch_fuzzy_duplicates(request: BatchFuzzyRequest):
                     risk_level="none",
                     detection_method="fuzzy",
                 ))
-        report_bytes = generate_report_bytes(results)
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=batch_fuzzy_report.xlsx"},
+        response = _build_report_response(
+            results,
+            base_filename="batch_fuzzy_report",
+            download_format=request.download_format,
         )
+        if response:
+            return response
 
     return {
         "total_texts": len(request.texts),
@@ -219,6 +282,7 @@ async def detect_semantic_duplicate(
     batch_name: str | None = Form(None),
     threshold: float = Form(0.85),
     download_report: bool = Form(False),
+    download_format: str = Form("excel"),
 ):
     """Check if a single text is a semantic duplicate of any stored reference text."""
     if not embeddings_available():
@@ -249,22 +313,20 @@ async def detect_semantic_duplicate(
     )
 
     if download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
-        result = DetectionResult(
-            text=text,
-            is_duplicate=is_dup,
-            similarity_scores={"cosine_similarity": score or 0.0},
-            source=matched_text,
-            risk_level=classify_risk(score) if is_dup and score else "none",
-            detection_method="semantic",
+        response = _build_report_response(
+            [DetectionResult(
+                text=text,
+                is_duplicate=is_dup,
+                similarity_scores={"cosine_similarity": score or 0.0},
+                source=matched_text,
+                risk_level=classify_risk(score) if is_dup and score else "none",
+                detection_method="semantic",
+            )],
+            base_filename="semantic_detection_report",
+            download_format=download_format,
         )
-        report_bytes = generate_report_bytes([result])
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=semantic_detection_report.xlsx"},
-        )
+        if response:
+            return response
 
     return {
         "is_duplicate": is_dup,
@@ -295,8 +357,6 @@ async def detect_batch_semantic_duplicates(request: BatchSemanticRequest):
     )
 
     if request.download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
         seen: set[int] = set()
         results = []
         for i, j, score in duplicates:
@@ -319,12 +379,13 @@ async def detect_batch_semantic_duplicates(request: BatchSemanticRequest):
                     risk_level="none",
                     detection_method="semantic",
                 ))
-        report_bytes = generate_report_bytes(results)
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=batch_semantic_report.xlsx"},
+        response = _build_report_response(
+            results,
+            base_filename="batch_semantic_report",
+            download_format=request.download_format,
         )
+        if response:
+            return response
 
     return {
         "total_texts": len(request.texts),
@@ -455,8 +516,6 @@ async def detect_cross_batch_duplicates(request: CrossBatchRequest):
         })
 
     if request.download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(status_code=503, detail="openpyxl is not installed. Run: pip install openpyxl")
         report_items = [
             DetectionResult(
                 text=r["submitted_text"],
@@ -472,12 +531,13 @@ async def detect_cross_batch_duplicates(request: CrossBatchRequest):
             )
             for r in results
         ]
-        report_bytes = generate_report_bytes(report_items)
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=cross_batch_report.xlsx"},
+        response = _build_report_response(
+            report_items,
+            base_filename="cross_batch_report",
+            download_format=request.download_format,
         )
+        if response:
+            return response
 
     total_dups = sum(1 for r in results if r["is_duplicate"])
     return {
@@ -498,6 +558,7 @@ class BatchWord2VecRequest(BaseModel):
     texts: list[str]
     threshold: float = 0.85
     download_report: bool = False
+    download_format: str = "excel"
 
 
 @app.post("/batch-word2vec")
@@ -525,8 +586,6 @@ async def detect_batch_word2vec_duplicates(request: BatchWord2VecRequest):
         raise HTTPException(status_code=503, detail=str(e))
 
     if request.download_report:
-        if not _OPENPYXL_AVAILABLE:
-            raise HTTPException(status_code=503, detail="openpyxl not installed. Run: pip install openpyxl")
         seen: set[int] = set()
         results = []
         for i, j, score in duplicates:
@@ -549,12 +608,13 @@ async def detect_batch_word2vec_duplicates(request: BatchWord2VecRequest):
                     risk_level="none",
                     detection_method="word2vec",
                 ))
-        report_bytes = generate_report_bytes(results)
-        return StreamingResponse(
-            io.BytesIO(report_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=word2vec_report.xlsx"},
+        response = _build_report_response(
+            results,
+            base_filename="word2vec_report",
+            download_format=request.download_format,
         )
+        if response:
+            return response
 
     return {
         "total_texts": len(request.texts),
