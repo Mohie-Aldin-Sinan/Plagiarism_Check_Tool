@@ -37,8 +37,8 @@ This tool detects all of the above, produces structured reports, and ensures dat
 | Component | Technology | Role |
 |---|---|---|
 | Backend | Python, FastAPI | Detection services, database access, APIs |
-| Frontend | Next.js (TypeScript) | Upload UI, per-method analysis pages (refactor pending) |
-| Database | PostgreSQL + pgvector (Supabase) | Batches, per-cell data, embeddings, pipeline results |
+| Frontend | Next.js (TypeScript) | Landing page, analyzer forms, batch registration |
+| Database | PostgreSQL + pgvector (Supabase) | Reference batches, per-cell data, embeddings |
 
 ## Tech Stack
 
@@ -51,67 +51,99 @@ This tool detects all of the above, produces structured reports, and ensures dat
 | pandas | Excel/CSV ingestion and cleaning |
 | sentence-transformers | SBERT semantic similarity (all-MiniLM-L6-v2) |
 | transformers | AI-generated content detection (RoBERTa) |
-| openpyxl | Excel report export |
+| openpyxl | Excel report export + cross-compare reports |
 | python-dotenv | Environment management |
-| ddgs / BeautifulSoup4 | Web search + page text extraction |
-| scikit-learn | Used internally by some detection services |
+| ddgs / duckduckgo_search | Web search |
+| BeautifulSoup4 | Web page text extraction |
+| requests | HTTP for web scan |
+| rapidfuzz (optional) | License signature similarity |
+| pydantic / pydantic-settings | Request/response models + config |
 
 ### Frontend
 | Library | Purpose |  
 |---|---|
-| Next.js 14 (App Router) | React framework |
+| Next.js 16 (App Router) | React framework |
 | TypeScript | Type-safe frontend code |
-| Tailwind CSS | Styling |
+| Tailwind CSS (via PostCSS) | Styling |
 
 ## Repository Structure
 
 ```
 backend/
-├── .env
-├── .env.example
 ├── requirements.txt
+├── scripts/
+│   └── check_db.py                    # DB connectivity check
+├── tests/
+│   └── test_cross_compare.py          # cross-compare tests
 └── app/
-        ├── main.py                      # FastAPI entry, lifespan model loading
-        ├── core/
-        │   ├── config.py                # pydantic-settings, all env vars
-        │   ├── models.py                # shared Pydantic schemas
-        │   └── model_cache.py           # SBERT + RoBERTa loaded once
-        ├── api/
-        │   └── v1/
-        │       ├── router.py            # includes all sub-routers
-        │       ├── batches.py           # list/delete/rename batches
-        │       ├── ingest.py            # file upload, preprocessing, registration
-        │       ├── pipeline.py          # POST /pipeline/run
-        │       └── reports.py           # combined report download
-        ├── services/
-        │   ├── preprocessor.py          # reads Excel/CSV/TXT with cell positions
-        │   ├── exact_match.py           # SHA-256 exact duplicate detection
-        │   ├── fuzzy_match.py           # Levenshtein, Jaccard, N-gram, Hamming
-        │   ├── semantic_match.py        # SBERT cosine similarity
-        │   ├── ai_detector.py           # RoBERTa AI content detection
-        │   ├── web_scanner.py           # DuckDuckGo + BeautifulSoup web scan
-        │   ├── license_detector.py      # SPDX + copyright detection
-        │   └── pipeline_runner.py       # orchestrates pipeline execution
-        └── storage/
-                └── repository.py            # all DB queries via asyncpg pool
+    ├── __init__.py
+    ├── main.py                        # FastAPI entry, lifespan model loading
+    ├── core/
+    │   ├── __init__.py
+    │   ├── config.py                  # pydantic-settings, all env vars
+    │   ├── models.py                  # shared Pydantic schemas
+    │   └── model_cache.py             # SBERT + RoBERTa loaded once
+    ├── models/
+    │   └── schemas.py                 # (empty placeholder)
+    ├── api/
+    │   └── v1/
+    │       ├── router.py              # includes all sub-routers
+    │       ├── batches.py             # list/delete/rename batches
+    │       ├── ingest.py              # file upload, preprocessing, registration
+    │       ├── pipeline.py            # POST /pipeline/run
+    │       ├── reports.py             # combined report download
+    │       └── compare.py             # cross-file row/cell comparison
+    ├── services/
+    │   ├── __init__.py
+    │   ├── preprocessor.py            # reads Excel/CSV/TXT with cell positions
+    │   ├── exact_match.py             # SHA-256 exact duplicate detection
+    │   ├── fuzzy_match.py             # Levenshtein, Jaccard, N-gram
+    │   ├── semantic_match.py          # SBERT cosine similarity
+    │   ├── ai_detector.py             # RoBERTa AI content detection
+    │   ├── web_scanner.py             # DuckDuckGo + BeautifulSoup web scan
+    │   ├── license_detector.py        # SPDX + copyright detection
+    │   ├── cross_compare.py           # cross-sheet row/cell comparison
+    │   └── pipeline_runner.py         # orchestrates pipeline execution
+    └── storage/
+        └── repository.py              # all DB queries via asyncpg pool
 
-frontend/app/
-├── layout.tsx
-├── page.tsx
-├── components/
-│   ├── Navbar.tsx
-│   ├── Hero.tsx
-│   ├── About.tsx
-│   ├── Footer.tsx
-│   └── DetectionSelector.tsx
-└── analyze/
-        ├── exact/page.tsx
-        ├── fuzzy/page.tsx
-        ├── semantic/page.tsx
-        ├── ai-detect/page.tsx
-        ├── web-scan/page.tsx
-        ├── license/page.tsx
-        └── cross-batch/page.tsx
+frontend/
+├── README.md
+├── package.json
+├── package-lock.json
+├── next.config.ts
+├── eslint.config.mjs
+├── postcss.config.mjs
+├── tsconfig.json
+├── app/
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── globals.css
+│   ├── favicon.ico
+│   ├── components/
+│   │   ├── Navbar.tsx
+│   │   ├── HeroSection.tsx
+│   │   ├── AboutSection.tsx
+│   │   ├── Footer.tsx
+│   │   ├── DetectionSelector.tsx
+│   │   └── ThemeProvider.tsx
+│   ├── analyze/
+│   │   ├── AnalyzerLayout.tsx
+│   │   ├── exact/page.tsx
+│   │   ├── fuzzy/page.tsx
+│   │   ├── semantic/page.tsx
+│   │   ├── ai-detect/page.tsx
+│   │   ├── web-scan/page.tsx
+│   │   ├── license/page.tsx
+│   │   └── cross-batch/page.tsx
+│   └── register/
+│       └── page.tsx
+└── public/
+        ├── file.svg
+        ├── globe.svg
+        ├── next.svg
+        ├── vercel.svg
+        └── window.svg
 ```
 
 ## Database Schema
@@ -202,21 +234,26 @@ CREATE TABLE web_ai_result (
 
 ### Pipeline Run Flow (files to results)
 1. Upload file(s) to `POST /api/v1/pipeline/run` and choose methods.
-2. Pipeline reads and normalizes entries with position metadata.
-3. Exact/fuzzy/semantic duplication is computed and stored as `duplicate_pair` rows.
-4. Web scan + AI detection output is stored in `web_ai_result` rows.
-5. `pipeline_result` tracks run metadata, counts, and status.
+2. Pipeline reads and normalizes entries.
+3. Exact/fuzzy/semantic/AI/web/license methods run in-memory against reference texts.
+4. API returns a `PipelineResult` JSON payload (no pipeline results are stored in the database).
+
+### Server-side Pipeline Flow (registered batches only)
+1. Call `POST /api/v1/pipeline/run-on-server` with batch IDs and selected methods.
+2. All texts from the batches are loaded and cross-checked against each other.
+3. API returns a `PipelineResult` JSON payload.
 
 ## Detection Methods
 
 | Method | Algorithm | Thresholds | File |
 |---|---|---|---|
 | Exact Match | SHA-256 hash comparison | 100% identical | services/exact_match.py |
-| Fuzzy Match | Levenshtein, Jaccard, N-gram, Hamming | 0.85 / 0.70 / 0.75 / equal length | services/fuzzy_match.py |
+| Fuzzy Match | Levenshtein, Jaccard, N-gram | 0.85 default (Jaccard 0.68, N-gram 0.765) | services/fuzzy_match.py |
 | Semantic Match | SBERT cosine similarity | 0.85 | services/semantic_match.py |
-| AI Detection | RoBERTa classifier | Returns confidence 0.0–100.0 | services/ai_detector.py |
-| Web Scanner | DuckDuckGo + BeautifulSoup + windowed similarity | 10s timeout, 3 retries | services/web_scanner.py |
+| AI Detection | RoBERTa classifier | Returns confidence 0.0–1.0 | services/ai_detector.py |
+| Web Scanner | DuckDuckGo + BeautifulSoup + windowed similarity | 0.50 similarity (default), 10s timeout, 3 retries | services/web_scanner.py |
 | License Detector | SPDX + copyright patterns | N/A | services/license_detector.py |
+| Cross-Compare | Row/Cell comparison across Excel files | 75% (default) | services/cross_compare.py |
 | Pipeline Runner | Orchestrates selected methods | N/A | services/pipeline_runner.py |
 
 ## API Reference
@@ -235,6 +272,7 @@ Docs: http://localhost:8000/docs
 | Method | Path | Description |
 |---|---|---|
 | POST | /run | Unified detection run across selected methods |
+| POST | /run-on-server | Run pipeline on stored batches only |
 
 ### Batches — /api/v1/batches
 | Method | Path | Description |
@@ -248,51 +286,57 @@ Docs: http://localhost:8000/docs
 |---|---|---|
 | POST | /combined | Generate multi-sheet Excel report |
 
+### Compare — /api/v1/compare
+| Method | Path | Description |
+|---|---|---|
+| POST | /cross | Cross-file row/cell comparison (JSON result) |
+| POST | /report | Cross-file comparison report (.xlsx) |
+| POST | /colored | Color-coded workbook (.xlsx) |
+
 ## Pipeline Output Format
 
-### Duplicate Pair (exact/fuzzy/semantic)
+### PipelineResult (top-level)
 ```json
 {
-        "original_file": "Dataset1.xlsx",
-        "original_row": 2,
-        "original_col": "Query",
-        "original_cell_ref": "B2",
-        "original_text": "...",
-        "duplicate_file": "Dataset1.xlsx",
-        "duplicate_row": 10,
-        "duplicate_col": "Query",
-        "duplicate_cell_ref": "B10",
-        "duplicate_text": "...",
-        "detection_type": "Exact",
-        "method": "exact",
-        "similarity_pct": 100.0
-}
-```
-
-### Web + AI Result
-```json
-{
-        "source_file": "Dataset1.xlsx",
-        "row_number": 2,
-        "column_name": "Query",
-        "cell_ref": "B2",
-        "original_text": "...",
-        "is_plagiarised": true,
-        "source_url": "https://...",
-        "ai_detected_pct": 0.0
+        "pipeline_id": "a1b2c3d4-...",
+        "status": "completed",
+        "summary": {
+                "total_entries": 3,
+                "flagged": 1,
+                "risk_breakdown": {"high": 0, "medium": 1, "low": 0, "none": 2}
+        },
+        "results": [
+                {
+                        "entry_id": 1,
+                        "original_text": "...",
+                        "overall_risk": "medium",
+                        "methods": {
+                                "exact": {"is_duplicate": false, "matched_text": null, "batch": null},
+                                "fuzzy": {"is_duplicate": true, "scores": {"levenshtein": 0.91, "jaccard": 0.78, "ngram": 0.86}, "matched_text": "..."},
+                                "semantic": {"is_duplicate": false, "similarity": null, "matched_text": null},
+                                "ai_detection": {"is_ai_generated": false, "confidence": 0.11, "label": "Human"},
+                                "web_scan": {"found_online": false, "sources": [], "error": null},
+                                "license_check": {"has_license": false, "licenses": [], "risk_level": "none"}
+                        }
+                }
+        ]
 }
 ```
 
 ## Combined Report Format
 
-The combined Excel report includes three sheets:
-1. Row-to-Row Duplicates: Original, Duplicate, Type, Similarity (%).
-2. Cell-to-Cell Duplicates: Original, Duplicate, Type, Similarity (%).
-3. Web + AI Detection: Original, Plagiarised, Source, AI Detected (%).
+The combined Excel report includes seven sheets:
+1. Summary
+2. Exact Matches
+3. Fuzzy Matches
+4. Semantic Matches
+5. AI Detection
+6. Web Scan
+7. License Check
 
 ## Configuration
 
-Copy backend/.env.example to backend/.env and set:
+Create backend/.env and set:
 
 ```env
 DATABASE_URL=postgresql://user:password@host:port/dbname
@@ -316,7 +360,6 @@ cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
