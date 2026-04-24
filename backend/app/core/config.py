@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # ── Web scanner ───────────────────────────────────────────────────────────
     WEB_SCAN_TIMEOUT: int = 10
-    WEB_SCAN_RETRIES: int = 3
+    WEB_SCAN_RETRIES: int = 1
 
     # ── Minimum word thresholds ───────────────────────────────────────────────
     MIN_WORDS_FOR_AI: int = 10

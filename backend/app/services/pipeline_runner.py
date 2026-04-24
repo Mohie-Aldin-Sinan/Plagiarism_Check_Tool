@@ -8,8 +8,10 @@ Overall risk per entry = highest risk across all enabled methods.
 """
 
 import asyncio
+import io
 import logging
 import uuid
+import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.models import (
@@ -363,6 +365,22 @@ async def run_full_pipeline(
     def _clamp_pct(value: float) -> float:
         return max(0.0, min(100.0, value))
 
+    def _extract_xlsx_from_zip(filename: str, contents: bytes) -> List[Tuple[str, bytes]]:
+        if not filename.lower().endswith(".zip"):
+            return []
+        extracted: List[Tuple[str, bytes]] = []
+        try:
+            with zipfile.ZipFile(io.BytesIO(contents)) as zf:
+                for zip_info in zf.infolist():
+                    if zip_info.is_dir():
+                        continue
+                    inner_name = zip_info.filename
+                    if inner_name.lower().endswith(".xlsx"):
+                        extracted.append((inner_name, zf.read(zip_info)))
+        except Exception as exc:
+            logger.warning("Failed to extract XLSX from %s: %s", filename, exc)
+        return extracted
+
     entries_by_file: Dict[str, List[Dict[str, object]]] = {}
     all_entries: List[Dict[str, object]] = []
 
@@ -380,16 +398,25 @@ async def run_full_pipeline(
             loop = asyncio.get_event_loop()
             from functools import partial
 
-            row_matches, cell_matches = await loop.run_in_executor(
-                None,
-                partial(
-                    run_cross_comparison,
-                    files,
-                    threshold,
-                    do_row_compare=methods_config.exact or methods_config.fuzzy,
-                    do_cell_compare=methods_config.exact or methods_config.fuzzy,
-                ),
-            )
+            compare_files: List[Tuple[str, bytes]] = []
+            for fname, fbytes in files:
+                if fname.lower().endswith(".xlsx"):
+                    compare_files.append((fname, fbytes))
+                elif fname.lower().endswith(".zip"):
+                    compare_files.extend(_extract_xlsx_from_zip(fname, fbytes))
+
+            row_matches, cell_matches = [], []
+            if compare_files:
+                row_matches, cell_matches = await loop.run_in_executor(
+                    None,
+                    partial(
+                        run_cross_comparison,
+                        compare_files,
+                        threshold,
+                        do_row_compare=methods_config.exact or methods_config.fuzzy,
+                        do_cell_compare=methods_config.exact or methods_config.fuzzy,
+                    ),
+                )
 
             filtered_cell_matches = []
             for match in cell_matches:
