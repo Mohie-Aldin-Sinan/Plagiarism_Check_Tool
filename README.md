@@ -8,18 +8,19 @@ This project provides a unified plagiarism and duplicate detection pipeline for 
 
 1. [Problem Statement](#problem-statement)
 2. [System Overview](#system-overview)
-3. [Tech Stack](#tech-stack)
-4. [Repository Structure](#repository-structure)
-5. [Database Schema](#database-schema)
-6. [Data Flow](#data-flow)
-7. [Detection Methods](#detection-methods)
-8. [API Reference](#api-reference)
-9. [Pipeline Output Format](#pipeline-output-format)
-10. [Combined Report Format](#combined-report-format)
-11. [Cleaned Report](#cleaned-report)
-12. [Configuration](#configuration)
-13. [How to Run Locally](#how-to-run-locally)
-14. [Key Design Decisions](#key-design-decisions)
+3. [Architecture Diagram](#architecture-diagram)
+4. [Tech Stack](#tech-stack)
+5. [Repository Structure](#repository-structure)
+6. [Database Schema](#database-schema)
+7. [Data Flow](#data-flow)
+8. [Detection Methods](#detection-methods)
+9. [API Reference](#api-reference)
+10. [Pipeline Output Format](#pipeline-output-format)
+11. [Combined Report Format](#combined-report-format)
+12. [Cleaned Report](#cleaned-report)
+13. [Configuration](#configuration)
+14. [How to Run Locally](#how-to-run-locally)
+15. [Key Design Decisions](#key-design-decisions)
 
 ## Problem Statement
 
@@ -40,6 +41,10 @@ This tool detects all of the above, produces structured reports, and ensures dat
 | Backend | Python, FastAPI | Detection services, database access, APIs |
 | Frontend | Next.js (TypeScript) | Landing page, analyzer forms, batch registration |
 | Database | PostgreSQL + pgvector (Supabase) | Reference batches, per-cell data, embeddings |
+
+## Architecture Diagram
+
+![Architecture diagram](Architecture.png)
 
 ## Tech Stack
 
