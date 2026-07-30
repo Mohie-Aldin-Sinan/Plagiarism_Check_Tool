@@ -255,7 +255,23 @@ export default function PreviewPanel({
     };
   }, [open, kind, excelBlob]);
 
-  const reportTabs = ["Summary", "Row Matches", "Cell Matches", "Web / AI", "Risk Summary"];
+  const rows = Array.isArray(reportData?.row_duplicates) ? reportData.row_duplicates : [];
+  const cells = Array.isArray(reportData?.cell_duplicates) ? reportData.cell_duplicates : [];
+  const isColumnWise = rows.length === 0 && cells.length > 0;
+
+  useEffect(() => {
+    if (isColumnWise && activeTab === "Row Matches") {
+      setActiveTab("Cell Matches");
+    }
+  }, [isColumnWise, activeTab]);
+
+  const reportTabs = [
+    "Summary",
+    ...(!isColumnWise ? ["Row Matches"] : []),
+    "Cell Matches",
+    "Web / AI",
+    "Risk Summary",
+  ];
 
   const visibleExcelRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -581,7 +597,8 @@ function ReportPreview({
       ? safeNumber(summaryObj["total_rows"])
       : (summaryObj["total_entries"] !== undefined ? safeNumber(summaryObj["total_entries"]) : 0);
     // Combine row and cell duplicates (used for unique-row parsing from labels)
-    const allDuplicatePairs = [...rows, ...cells];
+    const pairsForPrs = rows.length > 0 ? rows : cells;
+    const allDuplicatePairs = [...pairsForPrs];
 
     const exactUniqueRows = uniqueRowsFromPairs(allDuplicatePairs, "Exact");
     const nearUniqueRows = uniqueRowsFromPairs(allDuplicatePairs, "Near");
@@ -603,12 +620,13 @@ function ReportPreview({
     }
 
     // Use backend summary counts where available (exact_row + exact_cell combined)
-    const exactPairs =
-      (safeNumber(summaryObj["exact_row_matches"]) + safeNumber(summaryObj["exact_cell_matches"])) ||
-      allDuplicatePairs.filter(r => r["type"] === "Exact").length;
-    const nearPairs =
-      (safeNumber(summaryObj["near_row_matches"]) + safeNumber(summaryObj["near_cell_matches"])) ||
-      allDuplicatePairs.filter(r => r["type"] === "Near").length;
+    const exactPairs = allDuplicatePairs.filter(
+      r => String(r["type"] || "") === "Exact"
+    ).length;
+
+    const nearPairs = allDuplicatePairs.filter(
+      r => String(r["type"] || "") === "Near"
+    ).length;
     const semanticPairs = 0;
     const aiPairs = safeNumber(summaryObj["ai_detected_entries"]) ||
       webAi.filter(r => safeNumber(r["ai_detected_pct"]) > 50.0).length;

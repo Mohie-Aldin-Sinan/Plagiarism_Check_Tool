@@ -136,11 +136,13 @@ def generate_pipeline_report(
         "AI Detected (%)": 18,
     }
 
-    sheets = [
-        ("Row-to-Row", df_rows),
-        ("Cell-to-Cell", df_cells),
-        ("AI-Plagiarism", df_web_ai),
-    ]
+    is_column_wise = (not row_duplicates and bool(cell_duplicates))
+
+    sheets = []
+    if not is_column_wise:
+        sheets.append(("Row-to-Row", df_rows))
+    sheets.append(("Cell-to-Cell", df_cells))
+    sheets.append(("AI-Plagiarism", df_web_ai))
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -264,7 +266,8 @@ def generate_pipeline_report(
 
         total_rows = summary.get("total_rows", 0) if summary else 0
 
-        all_duplicate_pairs = list(row_duplicates) + list(cell_duplicates)
+        pairs_for_prs = row_duplicates if row_duplicates else cell_duplicates
+        all_duplicate_pairs = list(pairs_for_prs)
 
         exact_pairs = [p for p in all_duplicate_pairs if p.get("type") == "Exact"]
         near_pairs  = [p for p in all_duplicate_pairs if p.get("type") == "Near"]
